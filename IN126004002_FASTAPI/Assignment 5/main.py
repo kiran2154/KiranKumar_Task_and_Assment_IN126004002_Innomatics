@@ -1,1 +1,187 @@
+from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel
+app = FastAPI()
+products = [
+    {"id": 1, "name": "Wireless Mouse", "price": 499, "category": "Electronics"},
+    {"id": 2, "name": "Notebook", "price": 99, "category": "Stationery"},
+    {"id": 3, "name": "USB Hub", "price": 799, "category": "Electronics"},
+    {"id": 4, "name": "Pen Set", "price": 49, "category": "Stationery"},
+]
+orders = []
+order_id_counter = 1
+class Order(BaseModel):
+    customer_name: str
+    product_id: int
+    quantity: int
+@app.get("/products")
+def get_products():
+    return {"products": products, "total": len(products)}
 
+@app.get("/products/search")
+def search_products(keyword: str = Query(...)):
+    result = [
+        p for p in products
+        if keyword.lower() in p["name"].lower()
+    ]
+
+    if not result:
+        return {"message": f"No products found for: {keyword}"}
+
+    return {
+        "keyword": keyword,
+        "total_found": len(result),
+        "products": result
+    }
+
+@app.get("/products/sort")
+def sort_products(
+    sort_by: str = "price",
+    order: str = "asc"
+):
+    if sort_by not in ["price", "name"]:
+        raise HTTPException(status_code=400, detail="sort_by must be 'price' or 'name'")
+
+    reverse = (order == "desc")
+
+    sorted_products = sorted(
+        products,
+        key=lambda p: p[sort_by],
+        reverse=reverse
+    )
+
+    return {
+        "sort_by": sort_by,
+        "order": order,
+        "products": sorted_products
+    }
+
+@app.get("/products/page")
+def paginate_products(
+    page: int = Query(1, ge=1),
+    limit: int = Query(2, ge=1)
+):
+    start = (page - 1) * limit
+    end = start + limit
+
+    return {
+        "page": page,
+        "limit": limit,
+        "total": len(products),
+        "total_pages": -(-len(products) // limit),
+        "products": products[start:end]
+    }
+
+@app.post("/orders")
+def create_order(order: Order):
+    global order_id_counter
+
+    product = next((p for p in products if p["id"] == order.product_id), None)
+
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    new_order = {
+        "order_id": order_id_counter,
+        "customer_name": order.customer_name,
+        "product": product["name"],
+        "quantity": order.quantity,
+        "total_price": product["price"] * order.quantity
+    }
+
+    orders.append(new_order)
+    order_id_counter += 1
+
+    return {"message": "Order created", "order": new_order}
+
+@app.get("/orders")
+def get_orders():
+    return {"orders": orders, "total_orders": len(orders)}
+
+@app.get("/orders/search")
+def search_orders(customer_name: str = Query(...)):
+    result = [
+        o for o in orders
+        if customer_name.lower() in o["customer_name"].lower()
+    ]
+
+    if not result:
+        return {"message": f"No orders found for: {customer_name}"}
+
+    return {
+        "customer_name": customer_name,
+        "total_found": len(result),
+        "orders": result
+    }
+
+@app.get("/products/sort-by-category")
+def sort_by_category():
+    result = sorted(
+        products,
+        key=lambda p: (p["category"], p["price"])
+    )
+
+    return {
+        "products": result,
+        "total": len(result)
+    }
+
+@app.get("/products/browse")
+def browse_products(
+    keyword: str = None,
+    sort_by: str = "price",
+    order: str = "asc",
+    page: int = Query(1, ge=1),
+    limit: int = Query(4, ge=1, le=20)
+):
+    result = products
+
+    if keyword:
+        result = [
+            p for p in result
+            if keyword.lower() in p["name"].lower()
+        ]
+
+    if sort_by in ["price", "name"]:
+        result = sorted(
+            result,
+            key=lambda p: p[sort_by],
+            reverse=(order == "desc")
+        )
+
+    total = len(result)
+    start = (page - 1) * limit
+    paged = result[start:start + limit]
+
+    return {
+        "keyword": keyword,
+        "sort_by": sort_by,
+        "order": order,
+        "page": page,
+        "limit": limit,
+        "total_found": total,
+        "total_pages": -(-total // limit),
+        "products": paged
+    }
+
+@app.get("/orders/page")
+def orders_pagination(
+    page: int = Query(1, ge=1),
+    limit: int = Query(3, ge=1, le=20)
+):
+    start = (page - 1) * limit
+
+    return {
+        "page": page,
+        "limit": limit,
+        "total": len(orders),
+        "total_pages": -(-len(orders) // limit),
+        "orders": orders[start:start + limit]
+    }
+
+@app.get("/products/{product_id}")
+def get_product(product_id: int):
+    for product in products:
+        if product["id"] == product_id:
+            return product
+
+    raise HTTPException(status_code=404, detail="Product not found")
